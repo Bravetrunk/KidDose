@@ -151,7 +151,8 @@
         /* Cards lift slightly under a real pointer; skipped on touch */
         @media (hover: hover) {
             .card-hover { transition: transform 0.25s var(--ease-soft); }
-            .card-hover:hover { transform: translateY(-2px); }
+            .card-hover:hover { transform: translateY(-4px); }
+            .card-hover:hover .card-surface { box-shadow: 0 12px 28px rgba(30, 34, 41, 0.14); }
         }
 
         /* Honour the OS setting — vestibular safety outranks polish */
@@ -1323,6 +1324,20 @@
             },
         };
 
+        // Category → brand color, shared by the sidebar nav and the sticky section headers
+        function getCategoryAccent(cat) {
+            switch (cat) {
+                case 'Antibiotics': return 'bg-catAnti';
+                case 'ER / Resuscitation': return 'bg-catEr';
+                case 'Asthma / Respiratory': return 'bg-catAsthma';
+                case 'GI / Digestive': return 'bg-catGi';
+                case 'Vitamins / Supplements': return 'bg-catVit';
+                case 'Neuro / Seizure': return 'bg-catNeuro';
+                case 'Favorites': return 'bg-catFav';
+                default: return 'bg-brandBlue';
+            }
+        }
+
         // Animates the number itself whenever it changes, so a dose that shifts
         // under the clinician's fingers is never mistaken for one that held still.
         function DoseValue({ value, className = '' }) {
@@ -1592,16 +1607,47 @@
             const [patientMode, setPatientMode] = React.useState('infant');
             const mode = PATIENT_MODES[patientMode];
 
-            // Filter & Search State
-            const [activeCategory, setActiveCategory] = React.useState('OPD Common');
+            // Search & Section-Nav State — the page is one continuous scroll grouped by
+            // category, so "activeCategory" no longer filters; it just tracks which
+            // section the ScrollSpy currently has in view for the sidebar highlight.
+            const [activeSection, setActiveSection] = React.useState('OPD Common');
             const [searchQuery, setSearchQuery] = React.useState('');
             const [pinnedDrugIds, setPinnedDrugIds] = React.useState(['paracetamol', 'amoxicillin']);
+            const [showBackToTop, setShowBackToTop] = React.useState(false);
+
+            // View Density — 'grid' (fewer, larger cards) or 'compact' (more, denser cards);
+            // remembered across visits so the clinician's preference sticks
+            const [viewDensity, setViewDensity] = React.useState(() => {
+                try { return localStorage.getItem('kiddose-view-density') || 'grid'; } catch (e) { return 'grid'; }
+            });
+            React.useEffect(() => {
+                try { localStorage.setItem('kiddose-view-density', viewDensity); } catch (e) {}
+            }, [viewDensity]);
+            const isCompactView = viewDensity === 'compact';
+            const cardGridClass = isCompactView
+                ? 'grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'
+                : 'grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3';
 
             // Selected Concentrations state override (drugId -> concId)
             const [selectedConcs, setSelectedConcs] = React.useState({});
 
             // Detail Modal State
             const [modalResult, setModalResult] = React.useState(null);
+
+            // Toast State — a single bottom-center toast shared by every card, so it's
+            // rendered once at the app root instead of nested inside a (transformed)
+            // card, which would otherwise clip its fixed positioning on hover
+            const [toastMessage, setToastMessage] = React.useState('');
+            const toastTimeoutRef = React.useRef(null);
+            const showToast = (message) => {
+                setToastMessage(message);
+                window.clearTimeout(toastTimeoutRef.current);
+                toastTimeoutRef.current = window.setTimeout(() => setToastMessage(''), 2400);
+            };
+
+            // DOM refs for each rendered category section — used both to smooth-scroll
+            // from a sidebar click and as the ScrollSpy's IntersectionObserver targets
+            const sectionRefs = React.useRef({});
 
             // React Effects
             React.useEffect(() => {
@@ -1613,7 +1659,7 @@
             // Handlers
             const handleTogglePin = (e, drugId) => {
                 e.stopPropagation();
-                setPinnedDrugIds(prev => 
+                setPinnedDrugIds(prev =>
                     prev.includes(drugId) ? prev.filter(id => id !== drugId) : [...prev, drugId]
                 );
             };
@@ -1622,21 +1668,73 @@
                 setSelectedConcs(prev => ({ ...prev, [drugId]: concId }));
             };
 
-            // Filtered Drugs Calculation
+            const scrollToSection = (cat) => {
+                const el = sectionRefs.current[cat];
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    setActiveSection(cat);
+                }
+            };
+
+            // Grouped Drugs Calculation — every category renders as its own section;
+            // search filters within each group, and empty groups (including their
+            // sticky headers) are dropped entirely rather than shown blank.
             const categories = ['OPD Common', 'Antibiotics', 'ER / Resuscitation', 'Asthma / Respiratory', 'GI / Digestive', 'Vitamins / Supplements', 'Neuro / Seizure', 'Favorites'];
 
-            const displayedDrugs = MASTER_DRUGS.filter(drug => {
-                // Search matching
-                const matchesSearch = drug.genericNameEn.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                                      drug.genericNameTh.toLowerCase().includes(searchQuery.toLowerCase());
-                if (!matchesSearch) return false;
+            const groupedDrugs = categories
+                .map(cat => {
+                    const drugs = MASTER_DRUGS.filter(drug => {
+                        const matchesSearch = drug.genericNameEn.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                              drug.genericNameTh.toLowerCase().includes(searchQuery.toLowerCase());
+                        if (!matchesSearch) return false;
 
-                // Category matching
-                if (activeCategory === 'Favorites') {
-                    return pinnedDrugIds.includes(drug.id);
+                        if (cat === 'Favorites') {
+                            return pinnedDrugIds.includes(drug.id);
+                        }
+                        return drug.category === cat;
+                    });
+                    return { cat, drugs };
+                })
+                .filter(group => group.drugs.length > 0);
+
+            const sectionKey = groupedDrugs.map(g => g.cat).join('|');
+
+            // ScrollSpy: highlights the sidebar item for whichever section sits in the
+            // top band of the viewport, and reveals "Back to Top" once the first
+            // category has scrolled out of view — independent of which panel actually
+            // owns the scrollbar (the results column on desktop, the window on mobile).
+            React.useEffect(() => {
+                const cats = groupedDrugs.map(g => g.cat);
+                const visible = new Set();
+
+                const spyObserver = new IntersectionObserver((entries) => {
+                    entries.forEach(entry => {
+                        const cat = entry.target.dataset.category;
+                        if (entry.isIntersecting) visible.add(cat); else visible.delete(cat);
+                    });
+                    const topMost = cats.find(c => visible.has(c));
+                    if (topMost) setActiveSection(topMost);
+                }, { rootMargin: '-88px 0px -70% 0px', threshold: 0 });
+
+                cats.forEach(cat => {
+                    const el = sectionRefs.current[cat];
+                    if (el) spyObserver.observe(el);
+                });
+
+                let topObserver;
+                const firstEl = cats.length && sectionRefs.current[cats[0]];
+                if (firstEl) {
+                    topObserver = new IntersectionObserver(([entry]) => {
+                        setShowBackToTop(entry.boundingClientRect.top < 0 && !entry.isIntersecting);
+                    }, { threshold: 0 });
+                    topObserver.observe(firstEl);
                 }
-                return drug.category === activeCategory;
-            });
+
+                return () => {
+                    spyObserver.disconnect();
+                    if (topObserver) topObserver.disconnect();
+                };
+            }, [sectionKey]);
 
             return (
                 <div className="w-full max-w-4xl mx-auto px-4 py-6 md:py-10 pb-24 lg:max-w-none lg:px-6 lg:py-5 lg:pb-5 lg:h-screen lg:flex lg:gap-6 lg:overflow-hidden">
@@ -1693,27 +1791,27 @@
                                 })}
                             </div>
 
-                            {/* Weight Input */}
-                            <div className="md:col-span-6 lg:col-span-1 bg-blue-50/60 p-4 lg:p-3 rounded-2xl border-2 border-brandBlue/30 focus-within:border-brandBlue transition-colors duration-300">
-                                <label className="block text-xs font-bold uppercase tracking-wider text-brandBlue mb-1">
+                            {/* Weight Input — number entry + range slider (quick-add chips removed) */}
+                            <div className="md:col-span-6 lg:col-span-1 lg:pb-4 lg:border-b lg:border-slate-200">
+                                <label className="block text-xs font-bold uppercase tracking-wider text-brandBlue mb-2">
                                     ⚖️ น้ำหนักผู้ป่วย (Patient Weight)
                                 </label>
-                                <div className="flex items-baseline justify-between gap-2">
-                                    <input
-                                        type="number"
-                                        step="0.1"
-                                        min="0.5"
-                                        max="100"
-                                        value={weightKg || ''}
-                                        onChange={(e) => setWeightKg(parseFloat(e.target.value) || 0)}
-                                        className="w-full bg-transparent text-3xl sm:text-4xl lg:text-3xl font-extrabold text-brandBlue outline-none tracking-tight"
-                                        placeholder="0.0"
-                                    />
-                                    <span className="text-xl sm:text-2xl font-bold text-brandBlue/70">kg</span>
-                                </div>
-                                
-                                {/* Weight Range Slider — range and step follow the selected patient mode */}
-                                <div className="mt-2 mb-1">
+                                <div className="bg-blue-50/60 px-3.5 py-3 rounded-2xl border-2 border-brandBlue/30 focus-within:border-brandBlue transition-colors duration-300">
+                                    <div className="flex items-baseline justify-between gap-2">
+                                        <input
+                                            type="number"
+                                            step="0.1"
+                                            min="0.5"
+                                            max="100"
+                                            value={weightKg || ''}
+                                            onChange={(e) => setWeightKg(parseFloat(e.target.value) || 0)}
+                                            className="w-full min-w-0 bg-transparent text-3xl sm:text-4xl font-extrabold text-brandBlue outline-none tracking-tight"
+                                            placeholder="0.0"
+                                        />
+                                        <span className="text-lg sm:text-xl font-bold text-brandBlue/70 shrink-0">kg</span>
+                                    </div>
+
+                                    {/* Weight Range Slider — range and step follow the selected patient mode */}
                                     <input
                                         type="range"
                                         min={mode.weight.min}
@@ -1721,35 +1819,14 @@
                                         step={mode.weight.step}
                                         value={weightKg || mode.weight.min}
                                         onChange={(e) => setWeightKg(parseFloat(e.target.value) || 0)}
-                                        className="w-full h-2 bg-brandBlue/20 rounded-lg appearance-none cursor-pointer accent-brandBlue"
+                                        className="w-full h-2 mt-1.5 bg-brandBlue/20 rounded-lg appearance-none cursor-pointer accent-brandBlue"
                                     />
                                 </div>
 
-                                {/* Mode-dependent controls — cross-fade in, panel height eases to fit */}
+                                {/* Mode-dependent hint — cross-fades in, panel height eases to fit */}
                                 <SmoothResize>
                                     <div key={patientMode} className="animate-fade-swap">
-                                        <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-brandBlue/10">
-                                            {mode.weight.chips.map((w) => (
-                                                <button
-                                                    key={w}
-                                                    onClick={() => setWeightKg(w)}
-                                                    className={`press px-2.5 py-1 text-xs font-bold rounded-full transition-colors duration-300 ${
-                                                        weightKg === w
-                                                            ? 'bg-brandBlue text-white shadow-sm'
-                                                            : 'bg-white/80 text-brandBlue hover:bg-white'
-                                                    }`}
-                                                >
-                                                    {w} kg
-                                                </button>
-                                            ))}
-                                            <button
-                                                onClick={() => setWeightKg(prev => Math.max(0.1, parseFloat((prev + mode.weight.nudge).toFixed(1))))}
-                                                className="press px-2 py-1 text-xs font-bold rounded-full bg-brandBlue/10 text-brandBlue hover:bg-brandBlue/20"
-                                            >
-                                                +{mode.weight.nudge}
-                                            </button>
-                                        </div>
-                                        <p className="text-[10px] font-semibold text-brandBlue/70 mt-1.5 leading-snug">
+                                        <p className="text-[10px] font-semibold text-brandBlue/70 mt-2 leading-snug">
                                             {mode.icon} {mode.hint}
                                         </p>
                                     </div>
@@ -1757,30 +1834,28 @@
                             </div>
 
                             {/* Secondary Controls: Age & Safety Toggles */}
-                            <div className="md:col-span-6 lg:col-span-1 space-y-3">
-                                {/* Age Selector */}
-                                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
-                                    <div className="flex items-center justify-between mb-1.5">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-base">👶</span>
-                                            <span className="text-xs font-bold text-textCharcoal">อายุ (Patient Age):</span>
-                                        </div>
-                                        <div className="flex items-center gap-1.5">
+                            <div className="md:col-span-6 lg:col-span-1 space-y-4">
+                                {/* Age Selector — number entry + range slider */}
+                                <div className="lg:pt-4 lg:pb-4 lg:border-b lg:border-slate-200">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <span className="text-base">👶</span>
+                                        <span className="text-xs font-bold uppercase tracking-wider text-textCharcoal">อายุ (Patient Age)</span>
+                                    </div>
+                                    <div className="bg-slate-50 px-3.5 py-3 rounded-2xl border border-slate-200 focus-within:border-brandBlue transition-colors duration-300">
+                                        <div className="flex items-baseline justify-between gap-2">
                                             <input
                                                 type="number"
                                                 min="0"
                                                 max="240"
                                                 value={ageMonths ?? ''}
                                                 onChange={(e) => setAgeMonths(e.target.value === '' ? null : parseInt(e.target.value))}
-                                                className="w-16 text-center font-bold text-sm bg-white border border-slate-200 rounded-xl py-1 text-textCharcoal focus:border-brandBlue outline-none"
-                                                placeholder="ระบุ"
+                                                className="w-full min-w-0 bg-transparent text-3xl sm:text-4xl font-extrabold text-textCharcoal outline-none tracking-tight"
+                                                placeholder="0"
                                             />
-                                            <span className="text-xs text-textMuted font-medium">เดือน ({ageMonths ? (ageMonths/12).toFixed(1) : 0} ปี)</span>
+                                            <span className="text-xs text-textMuted font-medium shrink-0">เดือน ({ageMonths ? (ageMonths/12).toFixed(1) : 0} ปี)</span>
                                         </div>
-                                    </div>
 
-                                    {/* Age Range Slider — span follows the selected patient mode */}
-                                    <div className="mt-2">
+                                        {/* Age Range Slider — span follows the selected patient mode */}
                                         <input
                                             type="range"
                                             min={mode.age.min}
@@ -1788,45 +1863,59 @@
                                             step="1"
                                             value={ageMonths ?? mode.age.min}
                                             onChange={(e) => setAgeMonths(parseInt(e.target.value))}
-                                            className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brandBlue"
+                                            className="w-full h-2 mt-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brandBlue"
                                         />
-                                        <div key={patientMode} className="animate-fade-swap flex justify-between text-[10px] font-medium text-textMuted mt-0.5 lg:hidden">
+                                        <div key={patientMode} className="animate-fade-swap flex justify-between text-[10px] font-medium text-textMuted mt-0.5">
                                             {mode.ageTicks.map((t) => <span key={t}>{t}</span>)}
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* Risk Condition Switches */}
-                                <div className="grid grid-cols-2 gap-2">
+                                {/* Risk Condition Toggle Switches */}
+                                <div className="space-y-2">
                                     {/* G6PD Toggle */}
-                                    <button
-                                        onClick={() => setIsG6PD(!isG6PD)}
-                                        className={`press p-2.5 rounded-2xl text-xs font-bold flex items-center justify-between border transition-colors duration-300 ${
+                                    <div
+                                        className={`p-2.5 rounded-2xl flex items-center justify-between border transition-colors duration-300 ${
                                             isG6PD
-                                                ? 'bg-redBg border-redFlag text-redFlag'
-                                                : 'bg-slate-50 border-slate-200 text-textMuted hover:bg-slate-100'
+                                                ? 'bg-redBg border-redFlag'
+                                                : 'bg-slate-50 border-slate-200'
                                         }`}
                                     >
-                                        <span className="flex items-center gap-1.5">
+                                        <span className={`flex items-center gap-1.5 text-xs font-bold ${isG6PD ? 'text-redFlag' : 'text-textCharcoal'}`}>
                                             <span>🧬</span> G6PD Deficient
                                         </span>
-                                        <span className={`w-3 h-3 rounded-full ${isG6PD ? 'bg-redFlag' : 'bg-slate-300'}`}></span>
-                                    </button>
+                                        <button
+                                            role="switch"
+                                            aria-checked={isG6PD}
+                                            aria-label="G6PD Deficient"
+                                            onClick={() => setIsG6PD(!isG6PD)}
+                                            className={`press relative shrink-0 w-11 h-6 rounded-full transition-colors duration-300 ${isG6PD ? 'bg-redFlag' : 'bg-slate-300'}`}
+                                        >
+                                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-300 ${isG6PD ? 'translate-x-5' : 'translate-x-0'}`}></span>
+                                        </button>
+                                    </div>
 
                                     {/* Renal Toggle */}
-                                    <button
-                                        onClick={() => setHasRenal(!hasRenal)}
-                                        className={`press p-2.5 rounded-2xl text-xs font-bold flex items-center justify-between border transition-colors duration-300 ${
+                                    <div
+                                        className={`p-2.5 rounded-2xl flex items-center justify-between border transition-colors duration-300 ${
                                             hasRenal
-                                                ? 'bg-amberBg border-amberWarning text-amber-700'
-                                                : 'bg-slate-50 border-slate-200 text-textMuted hover:bg-slate-100'
+                                                ? 'bg-amberBg border-amberWarning'
+                                                : 'bg-slate-50 border-slate-200'
                                         }`}
                                     >
-                                        <span className="flex items-center gap-1.5">
+                                        <span className={`flex items-center gap-1.5 text-xs font-bold ${hasRenal ? 'text-amber-700' : 'text-textCharcoal'}`}>
                                             <span>🫘</span> Renal Impairment
                                         </span>
-                                        <span className={`w-3 h-3 rounded-full ${hasRenal ? 'bg-amberWarning' : 'bg-slate-300'}`}></span>
-                                    </button>
+                                        <button
+                                            role="switch"
+                                            aria-checked={hasRenal}
+                                            aria-label="Renal Impairment"
+                                            onClick={() => setHasRenal(!hasRenal)}
+                                            className={`press relative shrink-0 w-11 h-6 rounded-full transition-colors duration-300 ${hasRenal ? 'bg-amberWarning' : 'bg-slate-300'}`}
+                                        >
+                                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-300 ${hasRenal ? 'translate-x-5' : 'translate-x-0'}`}></span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 
@@ -1834,27 +1923,20 @@
                     </section>
 
                     {}
-                    {/* Category Selector — horizontal scroller on mobile, vertical list on desktop */}
+                    {/* Category Nav (ScrollSpy anchors) — horizontal scroller on mobile, vertical list on desktop */}
                     <div className="flex gap-2 overflow-x-auto pb-2 mb-6 scrollbar-none lg:flex-col lg:gap-1.5 lg:overflow-x-visible lg:pb-0 lg:mb-3">
                             {categories.map((cat) => {
-                                const isActive = activeCategory === cat;
-                                let activeColorClass = 'bg-brandBlue text-white';
-                                if (cat === 'Antibiotics') activeColorClass = 'bg-catAnti text-white';
-                                if (cat === 'ER / Resuscitation') activeColorClass = 'bg-catEr text-white';
-                                if (cat === 'Asthma / Respiratory') activeColorClass = 'bg-catAsthma text-white';
-                                if (cat === 'GI / Digestive') activeColorClass = 'bg-catGi text-white';
-                                if (cat === 'Vitamins / Supplements') activeColorClass = 'bg-catVit text-white';
-                                if (cat === 'Neuro / Seizure') activeColorClass = 'bg-catNeuro text-white';
-                                if (cat === 'Favorites') activeColorClass = 'bg-catFav text-white';
+                                const isActive = activeSection === cat;
+                                const accentClass = getCategoryAccent(cat);
 
                                 return (
                                     <button
                                         key={cat}
-                                        onClick={() => setActiveCategory(cat)}
-                                        className={`press px-4 py-2.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors duration-300 shadow-sm lg:w-full lg:text-left lg:py-1.5 lg:px-3 ${
+                                        onClick={() => scrollToSection(cat)}
+                                        className={`press px-4 py-2.5 rounded-full text-xs font-bold whitespace-nowrap transition-colors duration-200 lg:w-full lg:text-left lg:py-1.5 lg:px-3 ${
                                             isActive
-                                                ? activeColorClass
-                                                : 'bg-cardSurface text-textMuted hover:bg-slate-100 border border-slate-100'
+                                                ? `${accentClass} text-white shadow-sm`
+                                                : 'bg-gray-50 text-gray-700 border border-gray-100 hover:bg-blue-50 hover:text-blue-600'
                                         }`}
                                     >
                                         {cat === 'Favorites' && '⭐ '}
@@ -1875,57 +1957,124 @@
                     {/* Results column — the only region that scrolls on desktop */}
                     <div className="lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
 
-                        {/* Search Input */}
-                        <div className="relative mb-4 lg:shrink-0">
-                            <input
-                                type="text"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="🔍 ค้นหายาภาษาไทย หรือ Generic Name (เช่น Paracetamol, อะม็อกซี่)..."
-                                className="w-full bg-cardSurface border border-slate-200 focus:border-brandBlue rounded-2xl py-3 px-4 pl-11 text-sm font-medium text-textCharcoal placeholder-textMuted shadow-sm outline-none transition-all"
-                            />
-                            {searchQuery && (
+                        {/* Search Input + View Density toggle */}
+                        <div className="flex items-center gap-2 mb-4 lg:shrink-0">
+                            <div className="relative flex-1">
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    placeholder="🔍 ค้นหายาภาษาไทย หรือ Generic Name (เช่น Paracetamol, อะม็อกซี่)..."
+                                    className="w-full bg-cardSurface border border-slate-200 focus:border-brandBlue rounded-2xl py-3 px-4 pl-11 text-sm font-medium text-textCharcoal placeholder-textMuted shadow-sm outline-none transition-all"
+                                />
+                                {searchQuery && (
+                                    <button
+                                        onClick={() => setSearchQuery('')}
+                                        className="press absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold bg-slate-100 text-textMuted w-6 h-6 rounded-full hover:bg-slate-200"
+                                    >
+                                        ✕
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* View Density segmented control — grid (large cards) vs. compact (denser grid) */}
+                            <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1 shrink-0" role="group" aria-label="มุมมองรายการยา">
                                 <button
-                                    onClick={() => setSearchQuery('')}
-                                    className="press absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold bg-slate-100 text-textMuted w-6 h-6 rounded-full hover:bg-slate-200"
+                                    onClick={() => setViewDensity('grid')}
+                                    aria-label="Grid View"
+                                    aria-pressed={!isCompactView}
+                                    title="Grid View"
+                                    className={`press w-8 h-8 rounded-lg flex items-center justify-center text-sm transition-colors duration-200 ${
+                                        !isCompactView ? 'bg-white text-brandBlue shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                                    }`}
                                 >
-                                    ✕
+                                    ▦
                                 </button>
-                            )}
+                                <button
+                                    onClick={() => setViewDensity('compact')}
+                                    aria-label="Compact View"
+                                    aria-pressed={isCompactView}
+                                    title="Compact View"
+                                    className={`press w-8 h-8 rounded-lg flex items-center justify-center text-sm transition-colors duration-200 ${
+                                        isCompactView ? 'bg-white text-brandBlue shadow-sm' : 'text-slate-400 hover:text-slate-600'
+                                    }`}
+                                >
+                                    ☰
+                                </button>
+                            </div>
                         </div>
 
                     {/* Scroll lives on this wrapper — a height-constrained grid would compress its own rows */}
                     <div className="lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
-                    {/* Drug Cards List */}
-                    <main className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3 lg:pb-2">
-                        {displayedDrugs.length === 0 ? (
-                            <div className="bg-cardSurface rounded-3xl p-10 text-center text-textMuted border border-dashed border-slate-200 lg:col-span-full">
+                    {/* Drug Cards List — grouped by category, one sticky header per section */}
+                    <main className="lg:pb-2">
+                        {groupedDrugs.length === 0 ? (
+                            <div className="bg-cardSurface rounded-3xl p-10 text-center text-textMuted border border-dashed border-slate-200">
                                 <p className="text-3xl mb-2">🔍</p>
                                 <p className="font-bold text-sm">ไม่พบรายการยาที่ตรงกับเงื่อนไข</p>
                                 <p className="text-xs mt-1">ลองเปลี่ยนคำค้นหา หรือเลือกหมวดหมู่อื่น</p>
                             </div>
                         ) : (
-                            displayedDrugs.map((drug, idx) => {
-                                const overrideConcId = selectedConcs[drug.id];
-                                const result = calculateDose(drug, weightKg, ageMonths, isG6PD, hasRenal, overrideConcId);
-                                const isPinned = pinnedDrugIds.includes(drug.id);
+                            groupedDrugs.map(({ cat, drugs }) => (
+                                <section
+                                    key={cat}
+                                    data-category={cat}
+                                    ref={(el) => { sectionRefs.current[cat] = el; }}
+                                    className="mb-8 last:mb-0"
+                                >
+                                    {/* Sticky section header — pins to the top of the scroll container while its cards pass underneath */}
+                                    <div className="sticky top-0 z-10 -mx-1 px-1 py-2.5 mb-3 backdrop-blur-md bg-bgWarm/80 flex items-center gap-2">
+                                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${getCategoryAccent(cat)}`}></span>
+                                        <h2 className="text-xl font-bold text-gray-800">
+                                            {cat === 'Favorites' && '⭐ '}
+                                            {cat}
+                                        </h2>
+                                        <span className="text-xs font-bold text-slate-400">{drugs.length} รายการ</span>
+                                    </div>
 
-                                return (
-                                    <DrugResultCard
-                                        key={drug.id}
-                                        index={idx}
-                                        result={result}
-                                        isPinned={isPinned}
-                                        onTogglePin={(e) => handleTogglePin(e, drug.id)}
-                                        onConcChange={(concId) => handleConcChange(drug.id, concId)}
-                                        onOpenDetail={() => setModalResult(result)}
-                                    />
-                                );
-                            })
+                                    <div className={cardGridClass}>
+                                        {drugs.map((drug, idx) => {
+                                            const overrideConcId = selectedConcs[drug.id];
+                                            const result = calculateDose(drug, weightKg, ageMonths, isG6PD, hasRenal, overrideConcId);
+                                            const isPinned = pinnedDrugIds.includes(drug.id);
+
+                                            return (
+                                                <DrugResultCard
+                                                    key={drug.id}
+                                                    index={idx}
+                                                    result={result}
+                                                    isPinned={isPinned}
+                                                    isCompact={isCompactView}
+                                                    onTogglePin={(e) => handleTogglePin(e, drug.id)}
+                                                    onConcChange={(concId) => handleConcChange(drug.id, concId)}
+                                                    onOpenDetail={() => setModalResult(result)}
+                                                    onCopyToast={showToast}
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                </section>
+                            ))
                         )}
                     </main>
                     </div>
                     </div>
+
+                    {}
+                    {/* Back to Top FAB — appears once the first category has scrolled out of view */}
+                    {showBackToTop && (
+                        <button
+                            onClick={() => scrollToSection(groupedDrugs[0] ? groupedDrugs[0].cat : categories[0])}
+                            aria-label="กลับไปด้านบน"
+                            className="press fixed bottom-6 right-6 z-40 w-12 h-12 rounded-full bg-brandBlue text-white shadow-lg flex items-center justify-center text-xl font-bold hover:bg-brandBlueHover transition-colors soft-glow"
+                        >
+                            ↑
+                        </button>
+                    )}
+
+                    {}
+                    {/* Copy-to-EMR Toast — rendered once at the app root, bottom-center */}
+                    <Toast message={toastMessage} />
 
                     {}
                     {/* Clinical Detail Modal */}
@@ -1951,11 +2100,32 @@
             );
         }
 
-        function DrugResultCard({ result, index = 0, isPinned, onTogglePin, onConcChange, onOpenDetail }) {
+        // Bottom-center success toast — fixed to the viewport, slides up/fades in on show
+        function Toast({ message }) {
+            const visible = !!message;
+            return (
+                <div
+                    aria-live="polite"
+                    className={`fixed left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ${
+                        visible ? 'bottom-6 opacity-100' : '-bottom-4 opacity-0 pointer-events-none'
+                    }`}
+                >
+                    <div className="flex items-center gap-2 bg-emerald-600 text-white text-xs sm:text-sm font-bold pl-3 pr-4 py-3 rounded-2xl shadow-lg soft-glow">
+                        <span className="w-5 h-5 shrink-0 rounded-full bg-white/20 flex items-center justify-center text-[11px]">✅</span>
+                        {message || ' '}
+                    </div>
+                </div>
+            );
+        }
+
+        function DrugResultCard({ result, index = 0, isPinned, isCompact = false, onTogglePin, onConcChange, onOpenDetail, onCopyToast }) {
             const { drug, calculatedMg, calculatedMgMax, calculatedMl, calculatedMlMax, selectedConc,
                     isMaxCapReached, hasRedFlag, hasAmberWarning, alertMessages, bandDesc, noDose } = result;
 
             const [infoOpen, setInfoOpen] = React.useState(false);
+            const [justCopied, setJustCopied] = React.useState(false);
+            const copyTimeoutRef = React.useRef(null);
+            React.useEffect(() => () => window.clearTimeout(copyTimeoutRef.current), []);
 
             // Card background & border style calculation
             let cardBgClass = 'bg-cardSurface border-slate-100 hover:border-brandBlue/30';
@@ -1969,8 +2139,64 @@
                 volumeColorClass = 'text-amber-700';
             }
 
+            // Safety Progress Bar — dose vs. the drug's max single-dose ceiling
+            // (only meaningful for straight mg/kg dosing; age-band drugs have no ceiling)
+            const maxSingleDoseMg = drug.doseRule.maxSingleDoseMg;
+            const hasMaxLimit = drug.doseRule.doseType !== 'ageBand' && typeof maxSingleDoseMg === 'number' && !noDose && calculatedMg > 0;
+            const dosePct = hasMaxLimit ? Math.min(100, Math.round((calculatedMg / maxSingleDoseMg) * 100)) : 0;
+            let doseBarColorClass = 'bg-green-400';
+            let doseLabelColorClass = 'text-gray-400';
+            if (isMaxCapReached) {
+                doseBarColorClass = 'bg-red-500';
+                doseLabelColorClass = 'text-red-600';
+            } else if (dosePct > 90) {
+                doseBarColorClass = 'bg-amber-500';
+                doseLabelColorClass = 'text-amber-600';
+            }
+
+            // Copy the calculated dose as a clinical-note-ready line, e.g.
+            // "Amoxicillin 125 mg / 5 mL, 7.5 mL PO"
+            const handleCopyToEMR = (e) => {
+                e.stopPropagation();
+                if (noDose) return;
+
+                const prepLabel = selectedConc.label.split(' (')[0];
+                const doseText = formatRange(calculatedMl, calculatedMlMax);
+                const clinicalText = `${drug.genericNameEn} ${prepLabel}, ${doseText} ${getUnitLabel(selectedConc)} PO`;
+
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(clinicalText).catch(() => {});
+                }
+                if (navigator.vibrate) {
+                    navigator.vibrate(15);
+                }
+
+                setJustCopied(true);
+                window.clearTimeout(copyTimeoutRef.current);
+                copyTimeoutRef.current = window.setTimeout(() => setJustCopied(false), 2000);
+
+                if (onCopyToast) onCopyToast('Prescription copied to clipboard');
+            };
+
+            const handleOpenDetailIcon = (e) => {
+                e.stopPropagation();
+                onOpenDetail();
+            };
+
             // Stagger the entrance down the list, capped so long lists never feel slow
             const stagger = Math.min(index * 35, 280);
+
+            // One shared skeleton for both densities — Compact View just dials every
+            // number down a notch further; nothing structurally differs anymore, which
+            // keeps the two views pixel-consistent with each other.
+            const pad = isCompact ? 'p-3' : 'p-3.5';
+            const nameTextClass = isCompact ? 'text-sm' : 'text-sm sm:text-[15px]';
+            const prepButtonClass = isCompact
+                ? 'press px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition-colors duration-200'
+                : 'press px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors duration-200';
+            const prepSelectClass = isCompact
+                ? 'h-7 bg-white border border-slate-200 rounded-lg px-2 text-xs font-bold text-textCharcoal outline-none focus:border-brandBlue cursor-pointer shadow-sm'
+                : 'h-8 bg-white border border-slate-200 rounded-lg px-2 text-sm font-bold text-textCharcoal outline-none focus:border-brandBlue cursor-pointer shadow-sm';
 
             return (
                 <div
@@ -1979,38 +2205,47 @@
                 >
                 <div
                     onClick={onOpenDetail}
-                    className={`w-full rounded-3xl p-5 lg:p-4 border soft-float morph cursor-pointer relative overflow-hidden flex flex-col ${cardBgClass}`}
+                    className={`card-surface w-full ${pad} rounded-2xl border soft-float morph cursor-pointer relative overflow-hidden flex flex-col ${cardBgClass}`}
                 >
-                    {/* Card Top Header */}
-                    <div className="flex items-start justify-between gap-3 mb-3">
-                        <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                                <h3 className="text-base sm:text-lg font-extrabold text-textCharcoal">
+                    {/* Card Top Header — badge + pin cluster top-right; an inline info icon
+                        next to the name stands in for a separate "รายละเอียด" row below */}
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="min-w-0 pr-1">
+                            <div className="flex items-center gap-1">
+                                <h3 className={`font-extrabold text-textCharcoal truncate ${nameTextClass}`}>
                                     {drug.genericNameEn}
                                 </h3>
-                                <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-slate-100 text-textMuted">
-                                    {drug.category}
-                                </span>
+                                <button
+                                    onClick={handleOpenDetailIcon}
+                                    aria-label="รายละเอียด"
+                                    title="รายละเอียด"
+                                    className="press shrink-0 text-slate-400 hover:text-brandBlue text-xs leading-none"
+                                >
+                                    ⓘ
+                                </button>
                             </div>
-                            <p className="text-xs sm:text-sm font-medium text-textMuted mt-0.5">
+                            <p className="text-[11px] font-medium text-slate-500 truncate leading-snug mt-0.5">
                                 {drug.genericNameTh}
                             </p>
                         </div>
-
-                        {/* Favorite Pin Button */}
-                        <button
-                            onClick={onTogglePin}
-                            className={`press p-2 rounded-2xl text-base ${
-                                isPinned ? 'bg-amber-100 text-amber-500' : 'bg-slate-100 text-slate-400 hover:text-amber-500'
-                            }`}
-                        >
-                            {isPinned ? '⭐' : '☆'}
-                        </button>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-slate-100 text-textMuted whitespace-nowrap">
+                                {drug.category}
+                            </span>
+                            <button
+                                onClick={onTogglePin}
+                                className={`press p-1 rounded-lg text-xs ${
+                                    isPinned ? 'bg-amber-100 text-amber-500' : 'bg-slate-100 text-slate-400 hover:text-amber-500'
+                                }`}
+                            >
+                                {isPinned ? '⭐' : '☆'}
+                            </button>
+                        </div>
                     </div>
 
                     {/* RED FLAG Banner (if active) */}
                     {hasRedFlag ? (
-                        <div className="animate-reveal-up my-3 p-3 bg-redFlag text-white rounded-2xl text-xs font-bold space-y-1">
+                        <div className="animate-reveal-up my-1.5 p-2 bg-redFlag text-white rounded-xl text-xs font-bold space-y-1">
                             <div className="flex items-center gap-1.5 text-sm">
                                 <span>⛔</span>
                                 <span>RED FLAG WARNING</span>
@@ -2020,17 +2255,14 @@
                                     • {msg}
                                 </p>
                             ))}
-                            <p className="text-[11px] pt-1 text-red-200 font-normal underline">
-                                แตะเพื่อดูรายละเอียดความปลอดภัยทางคลินิกเพิ่มเติม
-                            </p>
                         </div>
                     ) : (
                         <>
-                            {/* AMBER WARNING / MAX CAP Banner (if active) */}
+                            {/* AMBER WARNING / MAX CAP Banner (if active) — always sits directly above the dose amount, full card width */}
                             {(isMaxCapReached || hasAmberWarning) && (
-                                <div className="animate-reveal-up my-2 p-2.5 bg-amber-500/10 border border-amber-500/30 text-amber-800 rounded-2xl text-xs font-bold">
+                                <div className="animate-reveal-up w-full my-1.5 p-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-bold space-y-0.5">
                                     {alertMessages.map((msg, idx) => (
-                                        <p key={idx} className="flex items-center gap-1">
+                                        <p key={idx} className="flex items-center gap-1.5">
                                             <span>⚠️</span> {msg}
                                         </p>
                                     ))}
@@ -2039,7 +2271,7 @@
 
                             {}
                             {/* Dose Calculation Output Area */}
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 my-2 pt-2 border-t border-slate-200/50 lg:flex-col lg:items-stretch lg:gap-2">
+                            <div className="flex flex-col items-stretch gap-1.5 my-1.5 pt-1.5 border-t border-slate-200/50">
                                 <div
                                     className="animate-reveal-up"
                                     style={{ animationDelay: `${stagger + 90}ms` }}
@@ -2052,13 +2284,13 @@
                                         <div className="flex items-baseline gap-2 flex-wrap">
                                             <DoseValue
                                                 value={formatRange(calculatedMl, calculatedMlMax)}
-                                                className={`animate-dose-emphasis inline-block origin-left text-3xl sm:text-4xl font-black tracking-tight ${volumeColorClass}`}
+                                                className={`animate-dose-emphasis inline-block origin-left text-3xl font-black tracking-tight ${volumeColorClass}`}
                                             />
-                                            <span className={`text-xl font-bold ${volumeColorClass}`}>
+                                            <span className={`text-base font-bold ${volumeColorClass}`}>
                                                 {getUnitLabel(selectedConc)}
                                             </span>
                                             {calculatedMg > 0 && (
-                                                <span className="text-xs font-semibold text-textMuted">
+                                                <span className="text-xs font-semibold text-slate-500">
                                                     (<DoseValue
                                                         value={formatRange(calculatedMg, calculatedMgMax)}
                                                         className="inline-block"
@@ -2067,48 +2299,95 @@
                                             )}
                                         </div>
                                     )}
-                                    <p className="text-xs font-bold text-textCharcoal mt-0.5">
+
+                                    {/* Safety Progress Bar — dose vs. max single-dose ceiling */}
+                                    {hasMaxLimit && (
+                                        <div className="mt-1 mb-0.5">
+                                            <div className="h-1.5 w-full max-w-[150px] bg-gray-100 rounded-full overflow-hidden">
+                                                <div
+                                                    className={`h-full rounded-full transition-all duration-500 ${doseBarColorClass}`}
+                                                    style={{ width: `${dosePct}%` }}
+                                                ></div>
+                                            </div>
+                                            <p className={`text-[10px] font-semibold mt-1 ${doseLabelColorClass}`}>
+                                                {isMaxCapReached && '⚠️ '}{dosePct}% of Max Single Dose
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    <p className="text-[11px] font-bold text-textCharcoal mt-0.5 leading-tight">
                                         🗓️ {drug.doseRule.frequencyText}
                                     </p>
                                     {bandDesc && (
-                                        <p className="text-[11px] font-semibold text-brandBlue mt-0.5">
+                                        <p className="text-[10px] font-semibold text-brandBlue mt-0.5 leading-tight">
                                             📋 {bandDesc}
                                         </p>
                                     )}
                                 </div>
 
-                                {/* Concentration Selector Dropdown */}
-                                <div className="self-start sm:self-auto" onClick={(e) => e.stopPropagation()}>
-                                    <label className="flex items-center gap-1.5 text-[10px] font-bold text-textMuted uppercase mb-1">
-                                        ความเข้มข้นยา (Preparation)
-                                        <button
-                                            onClick={(e) => { e.stopPropagation(); setInfoOpen(true); }}
-                                            aria-label="ดูข้อมูลความเข้มข้นยา"
-                                            className="press w-4 h-4 shrink-0 rounded-full bg-slate-200 text-textMuted text-[10px] font-black leading-none hover:bg-brandBlue hover:text-white transition-colors"
+                                {/* Concentration Selector — segmented control for ≤3 preparations, dropdown for 4+ */}
+                                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                    {drug.concentrations.length <= 3 ? (
+                                        <div className="flex flex-wrap gap-1 bg-slate-100 rounded-lg p-0.5">
+                                            {drug.concentrations.map(c => (
+                                                <button
+                                                    key={c.id}
+                                                    onClick={(e) => { e.stopPropagation(); onConcChange(c.id); }}
+                                                    title={c.label}
+                                                    className={`${prepButtonClass} ${
+                                                        selectedConc.id === c.id
+                                                            ? 'bg-white text-brandBlue shadow-sm'
+                                                            : 'text-slate-500 hover:text-textCharcoal'
+                                                    }`}
+                                                >
+                                                    {c.label.split(' (')[0]}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <select
+                                            value={selectedConc.id}
+                                            onChange={(e) => onConcChange(e.target.value)}
+                                            className={prepSelectClass}
                                         >
-                                            i
-                                        </button>
-                                    </label>
-                                    <select
-                                        value={selectedConc.id}
-                                        onChange={(e) => onConcChange(e.target.value)}
-                                        className="bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-bold text-textCharcoal outline-none focus:border-brandBlue cursor-pointer shadow-sm"
+                                            {drug.concentrations.map(c => (
+                                                <option key={c.id} value={c.id}>
+                                                    {c.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    )}
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); setInfoOpen(true); }}
+                                        aria-label="ดูข้อมูลความเข้มข้นยา"
+                                        title="ดูข้อมูลความเข้มข้นยา"
+                                        className="press shrink-0 w-4 h-4 rounded-full bg-slate-200 text-slate-500 text-[10px] font-black leading-none hover:bg-brandBlue hover:text-white transition-colors"
                                     >
-                                        {drug.concentrations.map(c => (
-                                            <option key={c.id} value={c.id}>
-                                                {c.label}
-                                            </option>
-                                        ))}
-                                    </select>
+                                        i
+                                    </button>
                                 </div>
                             </div>
                         </>
                     )}
 
                     {/* Card Footer Hint — mt-auto keeps it aligned across cards in a grid row */}
-                    <div className="mt-3 lg:mt-auto pt-2 border-t border-slate-100 flex items-center justify-between gap-2 text-[11px] text-textMuted font-medium">
-                        <span>💡 {drug.clinicalNote}</span>
-                        <span className="font-bold text-brandBlue">รายละเอียด ➔</span>
+                    <div className="mt-1.5 lg:mt-auto pt-1.5 border-t border-slate-100 flex items-center justify-between gap-2 text-[10px] text-slate-500 font-medium">
+                        <span className="truncate">💡 {drug.clinicalNote}</span>
+                        <button
+                            onClick={handleCopyToEMR}
+                            disabled={noDose}
+                            aria-label="Copy to EMR"
+                            title="Copy to EMR"
+                            className={`press shrink-0 rounded-md p-1 border border-transparent transition-colors duration-200 text-xs leading-none ${
+                                noDose
+                                    ? 'text-gray-300 cursor-not-allowed'
+                                    : justCopied
+                                        ? 'text-green-500 border-green-200'
+                                        : 'text-gray-400 hover:text-blue-600 hover:border-blue-200'
+                            }`}
+                        >
+                            {justCopied ? '✅' : '📋'}
+                        </button>
                     </div>
                 </div>
 
