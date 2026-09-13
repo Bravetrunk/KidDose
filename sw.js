@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kiddose-v1';
+const CACHE_NAME = 'kiddose-v2';
 const ASSETS = [
   './',
   './index.html',
