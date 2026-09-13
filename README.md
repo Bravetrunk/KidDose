@@ -13,6 +13,7 @@ KidDose is a bilingual Thai/English pediatric dosage and safety calculator desig
 - Warns for configured G6PD and renal-safety concerns.
 - Groups medicines by clinical category and supports Thai/English search.
 - Lets users pin favorites, switch between grid and compact views, inspect calculation details, and copy a dose summary for an EMR.
+- Includes a Fact Check page with separate physician/prescriber and user/caregiver verification checklists linked to current WHO, FDA, and CDC guidance.
 - Includes a responsive PWA shell with an installable manifest and service worker.
 
 The current embedded catalog contains 43 medicine records across OPD Common, Antibiotics, ER / Resuscitation, Asthma / Respiratory, GI / Digestive, Vitamins / Supplements, and Neuro / Seizure categories. The catalog is maintained in `MASTER_DRUGS` inside `index.html` and must be clinically reviewed before production use.
@@ -57,6 +58,7 @@ If you use VS Code, the repository includes a Chrome launch configuration in `.v
 - The core dose calculation and safety evaluation run in the browser; there is no application server or database.
 - The service worker caches the local app shell after the first successful load. CDN-hosted libraries and fonts remain external runtime dependencies, so test offline behavior on the target devices before relying on it in a clinical setting.
 - The reference PDFs in `docs/` are project inputs, not a guarantee that the embedded dosing data is current. Review and version clinical data separately from UI changes.
+- The Fact Check page is a safety-reference layer, not a clinical certification. Recheck its linked guidance against current local policy, hospital protocol, and product labeling before deployment.
 
 ## Verification
 

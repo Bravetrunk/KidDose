@@ -1364,6 +1364,203 @@
             },
         };
 
+        // Fact-check content is intentionally separate from the calculator data.
+        // It documents what must be verified against current local guidance instead
+        // of presenting this page as a universal prescribing standard.
+        const FACT_CHECK_REVIEW_DATE = '13 Sep 2026';
+        const FACT_CHECK_SOURCES = [
+            {
+                id: 'who-primary',
+                authority: 'WHO',
+                title: 'Pocket book of primary health care for children and adolescents',
+                version: '2022; electronic corrigenda incorporated Jan 2025',
+                url: 'https://www.who.int/europe/publications/i/item/9789289057622',
+                focus: 'Outpatient assessment, rational use of essential medicines, counselling, and referral decisions.',
+            },
+            {
+                id: 'who-hospital',
+                authority: 'WHO',
+                title: 'Pocket book of hospital care for children, 2nd edition',
+                version: '2013',
+                url: 'https://tdr.who.int/home/our-work/global-engagement/9789241548373',
+                focus: 'Hospital-level management of common childhood illnesses and emergencies.',
+            },
+            {
+                id: 'fda-acetaminophen',
+                authority: 'FDA',
+                title: 'Acetaminophen safety information',
+                version: 'Current FDA safety resource',
+                url: 'https://www.fda.gov/drugs/safe-use-over-counter-pain-relievers-and-fever-reducers/acetaminophen',
+                focus: 'Read the product label, avoid duplicate acetaminophen products, and use a child-specific product and dose.',
+            },
+            {
+                id: 'fda-cough-cold',
+                authority: 'FDA',
+                title: 'Use caution with cough and cold products in children',
+                version: 'Current FDA safety resource',
+                url: 'https://www.fda.gov/drugs/safe-use-over-counter-otc-medicines-children/use-caution-when-giving-cough-and-cold-products-kids',
+                focus: 'Do not give products containing a decongestant or antihistamine to children under 2; many products say do not use under 4.',
+            },
+            {
+                id: 'fda-device',
+                authority: 'FDA',
+                title: 'Dosage delivery devices for orally ingested liquid medicines',
+                version: 'FDA guidance',
+                url: 'https://www.fda.gov/files/drugs/published/Dosage-Delivery-Devices-for-Orally-Ingested-OTC-Liquid-Drug-Products.pdf',
+                focus: 'Use mL, leading zeros, no trailing zeros, and the calibrated device supplied for the product.',
+            },
+            {
+                id: 'cdc-pediatric',
+                authority: 'CDC',
+                title: 'Outpatient clinical care for pediatric populations',
+                version: 'Updated 22 Apr 2024',
+                url: 'https://www.cdc.gov/antibiotic-use/hcp/clinical-care/pediatric-outpatient.html',
+                focus: 'Diagnosis-specific antibiotic prescribing principles for common pediatric outpatient conditions.',
+            },
+            {
+                id: 'cdc-protect',
+                authority: 'CDC',
+                title: 'PROTECT medication safety initiative',
+                version: 'Current CDC medication-safety resource',
+                url: 'https://www.cdc.gov/medication-safety/protect/',
+                focus: 'Use mL on labels and devices, reduce measurement errors, and store medicines safely around children.',
+            },
+        ];
+
+        const FACT_CHECK_CHECKLISTS = {
+            physician: [
+                {
+                    icon: '🩺',
+                    title: 'Confirm the clinical indication',
+                    body: 'Check the diagnosis, severity, treatment goal, route, and whether medicine is indicated at all. Antibiotic selection should follow a diagnosis-specific guideline and local susceptibility pattern; a dose calculator cannot diagnose infection.',
+                    status: 'Clinical review required',
+                    tone: 'blue',
+                    sourceIds: ['cdc-pediatric', 'who-primary'],
+                },
+                {
+                    icon: '👶',
+                    title: 'Verify patient-specific factors',
+                    body: 'Use a current measured weight in kg and a confirmed age. Review allergy history, renal and hepatic function, hydration, G6PD status, comorbidities, interactions, and any specialist restrictions before accepting a result.',
+                    status: 'Must verify for every patient',
+                    tone: 'red',
+                    sourceIds: ['who-primary', 'who-hospital'],
+                },
+                {
+                    icon: '🧪',
+                    title: 'Match the exact product and route',
+                    body: 'Compare the selected preparation with the bottle, vial, tablet, or sachet in hand. Confirm active ingredient, concentration, formulation, route, reconstitution, and whether the displayed unit is mL, mg, tablet, or sachet.',
+                    status: 'Product check required',
+                    tone: 'amber',
+                    sourceIds: ['fda-acetaminophen', 'fda-device', 'who-hospital'],
+                },
+                {
+                    icon: '📐',
+                    title: 'Check the dose basis and caps',
+                    body: 'Confirm whether the regimen is expressed as mg/kg/dose or mg/kg/day, the intended frequency and duration, and the current single-dose and daily maximum. A cap in KidDose is a safety signal, not permission to prescribe up to that cap.',
+                    status: 'Math and guideline check required',
+                    tone: 'purple',
+                    sourceIds: ['who-primary', 'who-hospital'],
+                },
+                {
+                    icon: '🚩',
+                    title: 'Resolve every warning before sign-off',
+                    body: 'Do not override an age, weight, G6PD, renal, allergy, interaction, or route warning without a documented clinical reason and an authoritative source. If the relevant age band or formulation is missing, use another current reference.',
+                    status: 'Escalate or document',
+                    tone: 'red',
+                    sourceIds: ['who-primary', 'who-hospital'],
+                },
+                {
+                    icon: '✍️',
+                    title: 'Communicate the final instruction',
+                    body: 'Prescribe and counsel in the same units the caregiver will use. For liquid medicines, communicate the amount in mL and the frequency, and make sure the caregiver has the correct calibrated device.',
+                    status: 'Document and teach-back',
+                    tone: 'green',
+                    sourceIds: ['fda-device', 'cdc-protect'],
+                },
+            ],
+            user: [
+                {
+                    icon: '✅',
+                    title: 'Use only a clinician-approved dose',
+                    body: 'KidDose helps with arithmetic; it does not diagnose a child or decide which medicine is appropriate. Use the dose and schedule on the prescription or product label, and ask a doctor or pharmacist if they differ.',
+                    status: 'Required every time',
+                    tone: 'blue',
+                    sourceIds: ['fda-acetaminophen', 'who-primary'],
+                },
+                {
+                    icon: '🏷️',
+                    title: 'Read the label and active ingredients',
+                    body: 'Check the child’s name, medicine name, strength, expiration, route, dose, frequency, and duration. Never assume an adult product or a familiar brand has the same concentration as the product in hand.',
+                    status: 'Label check required',
+                    tone: 'amber',
+                    sourceIds: ['fda-acetaminophen', 'fda-cough-cold'],
+                },
+                {
+                    icon: '💧',
+                    title: 'Measure liquid medicine in mL',
+                    body: 'Use the oral syringe or dosing cup supplied for that medicine. Do not use a kitchen spoon, do not guess between teaspoons and mL, and do not swap a measuring device between products.',
+                    status: 'Prevent measurement errors',
+                    tone: 'green',
+                    sourceIds: ['fda-device', 'cdc-protect'],
+                },
+                {
+                    icon: '⚠️',
+                    title: 'Avoid duplicate ingredients',
+                    body: 'Do not combine two products containing the same active ingredient, especially acetaminophen. Multi-ingredient cough and cold products can make accidental double-dosing easier.',
+                    status: 'High-risk mistake',
+                    tone: 'red',
+                    sourceIds: ['fda-acetaminophen', 'fda-cough-cold'],
+                },
+                {
+                    icon: '🍼',
+                    title: 'Use extra caution with infants',
+                    body: 'The FDA advises against cough and cold products containing a decongestant or antihistamine for children under 2, and many products carry a “do not use under 4” label. Ask a clinician about safer supportive care.',
+                    status: 'Age-specific warning',
+                    tone: 'red',
+                    sourceIds: ['fda-cough-cold'],
+                },
+                {
+                    icon: '🔒',
+                    title: 'Store medicine safely and ask when unsure',
+                    body: 'Keep medicines secured and out of children’s reach. If the child receives the wrong product, wrong amount, or develops an unexpected reaction, stop and contact a clinician, pharmacist, poison service, or emergency service promptly.',
+                    status: 'Safety action',
+                    tone: 'purple',
+                    sourceIds: ['cdc-protect'],
+                },
+            ],
+        };
+
+        const FACT_CHECK_HIGHLIGHTS = [
+            {
+                icon: '💧',
+                title: 'Liquid-dose standard',
+                body: 'Use mL and a calibrated dosing device. Match the product concentration before converting mg to volume.',
+                sourceIds: ['fda-device', 'cdc-protect'],
+                tone: 'green',
+            },
+            {
+                icon: '🍯',
+                title: 'Cough and cold products',
+                body: 'Under 2: avoid products containing a decongestant or antihistamine. Many labels say do not use under 4.',
+                sourceIds: ['fda-cough-cold'],
+                tone: 'red',
+            },
+            {
+                icon: '💊',
+                title: 'Acetaminophen duplication',
+                body: 'Read every active-ingredient list and do not give more than one acetaminophen-containing product at a time.',
+                sourceIds: ['fda-acetaminophen'],
+                tone: 'amber',
+            },
+            {
+                icon: '🧫',
+                title: 'Antibiotic stewardship',
+                body: 'Confirm a bacterial indication and use a diagnosis-specific, local guideline for agent, dose, and duration.',
+                sourceIds: ['cdc-pediatric'],
+                tone: 'blue',
+            },
+        ];
+
         // Category → brand color, shared by the sidebar nav and the sticky section headers
         function getCategoryAccent(cat) {
             switch (cat) {
@@ -1673,6 +1870,7 @@
 
             // Detail Modal State
             const [modalResult, setModalResult] = React.useState(null);
+            const [showFactCheck, setShowFactCheck] = React.useState(false);
 
             // Toast State — a single bottom-center toast shared by every card, so it's
             // rendered once at the app root instead of nested inside a (transformed)
@@ -1799,9 +1997,19 @@
                             </p>
                         </div>
 
-                        <div className="flex items-center gap-2 self-start sm:self-auto lg:self-start bg-emerald-50 text-safeMint border border-emerald-200/60 px-3 py-1.5 rounded-full text-xs font-semibold">
-                            <span className="w-2 h-2 rounded-full bg-safeMint animate-pulse"></span>
-                            100% Offline Ready
+                        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto lg:self-start">
+                            <button
+                                type="button"
+                                onClick={() => setShowFactCheck(true)}
+                                aria-label="เปิดหน้า Fact Check และแนวทาง"
+                                className="press bg-blue-50 text-brandBlue border border-blue-200/70 px-3 py-1.5 rounded-full text-xs font-bold hover:bg-blue-100 transition-colors"
+                            >
+                                🧾 Fact Check
+                            </button>
+                            <div className="flex items-center gap-2 bg-emerald-50 text-safeMint border border-emerald-200/60 px-3 py-1.5 rounded-full text-xs font-semibold">
+                                <span className="w-2 h-2 rounded-full bg-safeMint animate-pulse"></span>
+                                100% Offline Ready
+                            </div>
                         </div>
                     </header>
 
@@ -2127,6 +2335,10 @@
                         />
                     )}
 
+                    {showFactCheck && (
+                        <FactCheckPage onClose={() => setShowFactCheck(false)} />
+                    )}
+
                     {/* Legal Medical Disclaimer Footer (desktop shows the compact version in the sidebar) */}
                     <footer className="mt-12 text-center text-xs text-textMuted space-y-2 border-t border-slate-200/60 pt-6 lg:hidden">
                         <p className="font-semibold text-slate-500">
@@ -2438,6 +2650,255 @@
                         onClose={() => setInfoOpen(false)}
                     />
                 )}
+                </div>
+            );
+        }
+
+        const FACT_CHECK_TONE_CLASSES = {
+            blue: {
+                card: 'border-blue-200 bg-blue-50/70',
+                icon: 'bg-blue-100 text-blue-700',
+                badge: 'bg-blue-100 text-blue-700',
+            },
+            green: {
+                card: 'border-emerald-200 bg-emerald-50/70',
+                icon: 'bg-emerald-100 text-emerald-700',
+                badge: 'bg-emerald-100 text-emerald-700',
+            },
+            amber: {
+                card: 'border-amber-200 bg-amber-50/70',
+                icon: 'bg-amber-100 text-amber-700',
+                badge: 'bg-amber-100 text-amber-700',
+            },
+            red: {
+                card: 'border-red-200 bg-red-50/70',
+                icon: 'bg-red-100 text-red-700',
+                badge: 'bg-red-100 text-red-700',
+            },
+            purple: {
+                card: 'border-purple-200 bg-purple-50/70',
+                icon: 'bg-purple-100 text-purple-700',
+                badge: 'bg-purple-100 text-purple-700',
+            },
+        };
+
+        function FactCheckPage({ onClose }) {
+            const [audience, setAudience] = React.useState('physician');
+            const checklist = FACT_CHECK_CHECKLISTS[audience];
+            const sourceById = FACT_CHECK_SOURCES.reduce((lookup, source) => {
+                lookup[source.id] = source;
+                return lookup;
+            }, {});
+            useOverlayDismiss(onClose);
+
+            const pageTitle = audience === 'physician'
+                ? 'Physician verification checklist'
+                : 'User and caregiver safety checklist';
+
+            return (
+                <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="fact-check-title"
+                    className="fixed inset-0 z-[80] overflow-y-auto bg-bgWarm text-textCharcoal"
+                >
+                    <div className="min-h-full">
+                        <header className="sticky top-0 z-10 border-b border-slate-200/80 bg-white/95 backdrop-blur-md">
+                            <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2 min-w-0">
+                                    <div className="w-9 h-9 rounded-xl bg-brandBlue text-white flex items-center justify-center text-lg soft-glow">🧾</div>
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-extrabold truncate">Fact Check / ตรวจสอบแนวทาง</p>
+                                        <p className="text-[10px] text-textMuted font-medium">Clinical safety reference layer</p>
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    aria-label="ปิดหน้า Fact Check"
+                                    className="press shrink-0 w-9 h-9 rounded-full bg-slate-100 text-textMuted font-bold hover:bg-slate-200"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        </header>
+
+                        <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-16">
+                            <section className="rounded-3xl bg-textCharcoal text-white p-5 sm:p-7 soft-glow overflow-hidden relative">
+                                <div className="absolute -right-12 -top-12 w-40 h-40 rounded-full bg-brandBlue/30 blur-2xl"></div>
+                                <div className="relative">
+                                    <p className="text-[10px] uppercase tracking-[0.2em] text-blue-200 font-bold">MEDICAL SAFETY REFERENCE</p>
+                                    <h1 id="fact-check-title" className="text-2xl sm:text-3xl font-black tracking-tight mt-2">
+                                        Fact Check & Guidelines
+                                    </h1>
+                                    <p className="text-sm sm:text-base text-slate-200 font-medium mt-2 max-w-3xl leading-relaxed">
+                                        จุดตรวจสอบก่อนเชื่อผลคำนวณ สำหรับแพทย์ เภสัชกร ผู้สั่งยา และผู้ดูแลเด็ก
+                                    </p>
+                                    <p className="text-xs text-slate-300 mt-4 max-w-3xl leading-relaxed">
+                                        KidDose ช่วยคำนวณเลขและแสดง safety flags เท่านั้น ไม่รับรองการวินิจฉัย การเลือกยา หรือความถูกต้องของข้อมูลยาในทุกประเทศและทุกผลิตภัณฑ์
+                                    </p>
+                                    <div className="mt-5 inline-flex flex-wrap items-center gap-2 text-[10px] font-bold text-blue-100">
+                                        <span className="px-2.5 py-1 rounded-full bg-white/10 border border-white/10">Sources reviewed: {FACT_CHECK_REVIEW_DATE}</span>
+                                        <span className="px-2.5 py-1 rounded-full bg-white/10 border border-white/10">Recheck before clinical deployment</span>
+                                    </div>
+                                </div>
+                            </section>
+
+                            <section className="mt-6" aria-label="เลือกกลุ่มผู้อ่าน">
+                                <div role="tablist" aria-label="Fact check audience" className="grid grid-cols-2 gap-2 p-1.5 bg-white rounded-2xl border border-slate-200 shadow-sm">
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        id="fact-check-tab-physician"
+                                        aria-selected={audience === 'physician'}
+                                        aria-controls="fact-check-panel"
+                                        onClick={() => setAudience('physician')}
+                                        className={`press rounded-xl px-3 py-3 text-xs sm:text-sm font-extrabold transition-colors ${audience === 'physician' ? 'bg-brandBlue text-white shadow-md' : 'text-textMuted hover:bg-slate-50'}`}
+                                    >
+                                        🩺 Physician / Prescriber
+                                    </button>
+                                    <button
+                                        type="button"
+                                        role="tab"
+                                        id="fact-check-tab-user"
+                                        aria-selected={audience === 'user'}
+                                        aria-controls="fact-check-panel"
+                                        onClick={() => setAudience('user')}
+                                        className={`press rounded-xl px-3 py-3 text-xs sm:text-sm font-extrabold transition-colors ${audience === 'user' ? 'bg-brandBlue text-white shadow-md' : 'text-textMuted hover:bg-slate-50'}`}
+                                    >
+                                        👨‍👩‍👧 User / Caregiver
+                                    </button>
+                                </div>
+                            </section>
+
+                            <section
+                                id="fact-check-panel"
+                                role="tabpanel"
+                                aria-labelledby={`fact-check-tab-${audience}`}
+                                tabIndex="0"
+                                className="mt-8 outline-none"
+                            >
+                                <div className="flex items-end justify-between gap-3 mb-3">
+                                    <div>
+                                        <p className="text-[10px] uppercase tracking-wider text-brandBlue font-black">CHECKLIST {audience === 'physician' ? 'A' : 'B'}</p>
+                                        <h2 className="text-xl sm:text-2xl font-black tracking-tight mt-1">{pageTitle}</h2>
+                                    </div>
+                                    <span className="text-[10px] sm:text-xs font-bold text-textMuted text-right">{checklist.length} checks</span>
+                                </div>
+
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                                    {checklist.map((item, index) => {
+                                        const tone = FACT_CHECK_TONE_CLASSES[item.tone] || FACT_CHECK_TONE_CLASSES.blue;
+                                        return (
+                                            <article key={item.title} className={`rounded-2xl border p-4 sm:p-5 ${tone.card}`}>
+                                                <div className="flex items-start gap-3">
+                                                    <div className={`w-10 h-10 shrink-0 rounded-2xl flex items-center justify-center text-xl ${tone.icon}`}>
+                                                        {item.icon}
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <span className="text-[10px] font-black text-textMuted">0{index + 1}</span>
+                                                            <h3 className="text-sm sm:text-base font-extrabold leading-snug">{item.title}</h3>
+                                                        </div>
+                                                        <p className="text-xs text-slate-700 font-medium leading-relaxed mt-2">{item.body}</p>
+                                                        <div className="flex flex-wrap gap-1.5 mt-3">
+                                                            <span className={`px-2 py-1 rounded-full text-[10px] font-black ${tone.badge}`}>{item.status}</span>
+                                                            {item.sourceIds.map(sourceId => {
+                                                                const source = sourceById[sourceId];
+                                                                return (
+                                                                    <a
+                                                                        key={sourceId}
+                                                                        href={source.url}
+                                                                        target="_blank"
+                                                                        rel="noreferrer"
+                                                                        className="px-2 py-1 rounded-full bg-white/80 border border-white text-[10px] font-bold text-textMuted hover:text-brandBlue hover:border-blue-200"
+                                                                    >
+                                                                        {source.authority} source ↗
+                                                                    </a>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </article>
+                                        );
+                                    })}
+                                </div>
+                            </section>
+
+                            <section className="mt-9">
+                                <div className="mb-3">
+                                    <p className="text-[10px] uppercase tracking-wider text-brandBlue font-black">HIGH-VALUE FACTS</p>
+                                    <h2 className="text-xl sm:text-2xl font-black tracking-tight mt-1">Checks that prevent common errors</h2>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    {FACT_CHECK_HIGHLIGHTS.map(item => {
+                                        const tone = FACT_CHECK_TONE_CLASSES[item.tone] || FACT_CHECK_TONE_CLASSES.blue;
+                                        return (
+                                            <article key={item.title} className={`rounded-2xl border p-4 ${tone.card}`}>
+                                                <div className="flex items-start gap-3">
+                                                    <div className={`w-9 h-9 shrink-0 rounded-xl flex items-center justify-center text-lg ${tone.icon}`}>{item.icon}</div>
+                                                    <div>
+                                                        <h3 className="text-sm font-extrabold">{item.title}</h3>
+                                                        <p className="text-xs text-slate-700 font-medium leading-relaxed mt-1.5">{item.body}</p>
+                                                        <div className="flex flex-wrap gap-1.5 mt-2">
+                                                            {item.sourceIds.map(sourceId => {
+                                                                const source = sourceById[sourceId];
+                                                                return (
+                                                                    <a key={sourceId} href={source.url} target="_blank" rel="noreferrer" className="text-[10px] font-bold text-brandBlue hover:underline">
+                                                                        Read {source.authority} ↗
+                                                                    </a>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </article>
+                                        );
+                                    })}
+                                </div>
+                            </section>
+
+                            <section className="mt-9">
+                                <div className="mb-3">
+                                    <p className="text-[10px] uppercase tracking-wider text-brandBlue font-black">PRIMARY SOURCES</p>
+                                    <h2 className="text-xl sm:text-2xl font-black tracking-tight mt-1">Guideline library</h2>
+                                    <p className="text-xs text-textMuted font-medium mt-1">Open the original source and confirm the version used by your hospital, country, and product label.</p>
+                                </div>
+                                <div className="space-y-2">
+                                    {FACT_CHECK_SOURCES.map((source, index) => (
+                                        <a
+                                            key={source.id}
+                                            href={source.url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="group block rounded-2xl bg-white border border-slate-200 p-4 hover:border-brandBlue/40 hover:shadow-md transition-all"
+                                        >
+                                            <div className="flex items-start gap-3">
+                                                <span className="w-8 h-8 shrink-0 rounded-xl bg-slate-100 text-textMuted flex items-center justify-center text-[10px] font-black">{String(index + 1).padStart(2, '0')}</span>
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <span className="text-[10px] font-black px-2 py-1 rounded-full bg-blue-50 text-brandBlue">{source.authority}</span>
+                                                        <h3 className="text-sm font-extrabold group-hover:text-brandBlue transition-colors">{source.title}</h3>
+                                                    </div>
+                                                    <p className="text-[10px] text-textMuted font-bold mt-1">{source.version}</p>
+                                                    <p className="text-xs text-slate-700 font-medium leading-relaxed mt-1.5">{source.focus}</p>
+                                                </div>
+                                                <span className="shrink-0 text-brandBlue font-black">↗</span>
+                                            </div>
+                                        </a>
+                                    ))}
+                                </div>
+                            </section>
+
+                            <section className="mt-9 rounded-2xl border-2 border-amber-200 bg-amber-50 p-4 sm:p-5">
+                                <h2 className="text-sm font-black text-amber-900">Final safety gate / จุดตัดสินใจก่อนใช้จริง</h2>
+                                <p className="text-xs text-amber-900/80 font-semibold leading-relaxed mt-2">
+                                    หากข้อมูลจาก KidDose ขัดกับฉลากยา แนวทางโรงพยาบาล หรือ clinical reference ปัจจุบัน ให้หยุดใช้ผลนั้นและยึดแหล่งอ้างอิงที่ได้รับการรับรองล่าสุด ผู้พัฒนาและเครื่องมือนี้ไม่แทนที่การตรวจสอบโดยแพทย์หรือเภสัชกร
+                                </p>
+                            </section>
+                        </main>
+                    </div>
                 </div>
             );
         }
