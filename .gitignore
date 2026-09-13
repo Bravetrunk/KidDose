@@ -1,0 +1,24 @@
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+
+# Editor and local tooling output
+.idea/
+*.swp
+*.swo
+
+# JavaScript tooling output (if a build pipeline is added later)
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Temporary reports and logs
+*.log
+tmp/

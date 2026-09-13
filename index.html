@@ -2,8 +2,48 @@
 <html lang="th">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KidDose / DoseDek — Pediatric Dosage & Safety Calculator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>KidDose / DoseDek — Pediatric Dosage &amp; Safety Calculator</title>
+
+    <!-- PWA: Web App Manifest -->
+    <link rel="manifest" href="manifest.json">
+
+    <!-- PWA: Theme color (browser UI tint) -->
+    <meta name="theme-color" content="#2A6BFF">
+    <meta name="msapplication-TileColor" content="#2A6BFF">
+    <meta name="msapplication-TileImage" content="icons/icon-144x144.png">
+
+    <!-- PWA: iOS / Safari -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="KidDose">
+    <link rel="apple-touch-icon" href="icons/icon-180x180.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152x152.png">
+    <link rel="apple-touch-icon" sizes="144x144" href="icons/icon-144x144.png">
+    <link rel="apple-touch-icon" sizes="120x120" href="icons/icon-128x128.png">
+    <link rel="apple-touch-icon" sizes="76x76" href="icons/icon-96x96.png">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/icon-16x16.png">
+
+    <!-- SEO / Open Graph -->
+    <meta name="description" content="คำนวณขนาดยาเด็กอย่างปลอดภัยและแม่นยำ | Pediatric medication dosage &amp; safety calculator">
+    <meta property="og:title" content="KidDose — Pediatric Dosage Calculator">
+    <meta property="og:description" content="คำนวณขนาดยาเด็กอย่างปลอดภัยและแม่นยำ">
+    <meta property="og:image" content="icons/icon-512x512.png">
+    <meta property="og:type" content="website">
+
+    <!-- Service Worker Registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./sw.js')
+            .then(reg => console.log('[KidDose] SW registered:', reg.scope))
+            .catch(err => console.warn('[KidDose] SW failed:', err));
+        });
+      }
+    </script>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Google Fonts: Kanit & Plus Jakarta Sans -->
